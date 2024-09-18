@@ -21,6 +21,7 @@ namespace RTJuke.Audio.LibManagedBass
         protected System.Timers.Timer timer;
 
         protected SyncProcedure _mySync;
+        protected SyncProcedure _slidedSync;
         protected DSPProcedure _myDSP;
         protected DownloadProcedure _myDownload;
 
@@ -28,6 +29,7 @@ namespace RTJuke.Audio.LibManagedBass
 
         protected int bass_stream = 0;
         protected int streamEndSync = 0; // handle for stream end event
+        protected int streamSlideSync = 0; // handle for slided event     
         protected int streamDspSync = 0; // handle for dsp sync
         protected long currentpos_bytes = -1;
         protected double currentpos_secs = -1;
@@ -196,7 +198,17 @@ namespace RTJuke.Audio.LibManagedBass
 
         public BassAudioFile(String filename)
         {
-            Filename = filename;                                   
+            Filename = filename;
+
+            this.PlayStateChanged += BassAudioFile_PlayStateChanged;
+        }
+
+        private void BassAudioFile_PlayStateChanged(object sender, EventArgs e)
+        {
+            if (timer != null)
+            {
+                timer.Enabled = CurrentState == PlayState.Playing;
+            }
         }
 
         public virtual async Task<bool> LoadAsync()
@@ -218,12 +230,14 @@ namespace RTJuke.Audio.LibManagedBass
                     CurrentState = PlayState.ReadyToPlay;
 
                     timer = new System.Timers.Timer(500);                       
-                    timer.Elapsed += timer_Tick;
-                    timer.Enabled = true;                    
+                    timer.Elapsed += timer_Tick;                    
 
                      // register events     
-                     _mySync = new SyncProcedure(EndSync);
-                    streamEndSync = Bass.ChannelSetSync(bass_stream, SyncFlags.End | SyncFlags.Mixtime, 0, _mySync, IntPtr.Zero);                    
+                     _mySync = new SyncProcedure(EndSync);                    
+                    streamEndSync = Bass.ChannelSetSync(bass_stream, SyncFlags.End | SyncFlags.Mixtime, 0, _mySync, IntPtr.Zero);
+                    
+                    _slidedSync = new SyncProcedure(SlidedSync);
+                    streamSlideSync = Bass.ChannelSetSync(bass_stream, SyncFlags.Slided, 0, _slidedSync, IntPtr.Zero);
 
                     return true;
                 }
@@ -254,6 +268,11 @@ namespace RTJuke.Audio.LibManagedBass
         {
             // Der Stream hat das Ende erreicht
             CurrentState = PlayState.Ended;           
+        }
+
+        protected void SlidedSync(int handle, int channel, int data, IntPtr user)
+        {
+            OnFadeEnded();
         }
 
         private void DownloadProc(IntPtr Buffer, int Length, IntPtr User)
@@ -385,10 +404,12 @@ namespace RTJuke.Audio.LibManagedBass
             {
                 if (streamEndSync != 0)
                     Bass.ChannelRemoveSync(bass_stream, streamEndSync);
+                if (streamSlideSync != 0)
+                    Bass.ChannelRemoveSync(bass_stream, streamSlideSync);
                 if (streamDspSync != 0)
                     Bass.ChannelRemoveDSP(bass_stream, streamDspSync);
                 Bass.StreamFree(bass_stream);
-            }
+            }            
 
             CurrentState = PlayState.Closed;
         }
@@ -405,15 +426,15 @@ namespace RTJuke.Audio.LibManagedBass
         }
 
         public void FadeIn(int milliseconds)
-        {            
+        {                        
             Bass.ChannelSetAttribute(bass_stream, ChannelAttribute.Volume, 0);
             Bass.ChannelSlideAttribute(bass_stream, ChannelAttribute.Volume, Volume / 255.0f, milliseconds);
         }
 
         public void FadeOut(int milliseconds)
-        {
+        {            
             Bass.ChannelSetAttribute(bass_stream, ChannelAttribute.Volume, Volume / 255.0f);
-            Bass.ChannelSlideAttribute(bass_stream, ChannelAttribute.Volume, 0, milliseconds);
+            Bass.ChannelSlideAttribute(bass_stream, ChannelAttribute.Volume, 0, milliseconds);            
         }
 
         /// <summary>
@@ -456,9 +477,13 @@ namespace RTJuke.Audio.LibManagedBass
 
         protected void OnBufferProgressChanged()
         {
-            var eh = BufferStateChanged;
-            if (eh != null)
-                eh(this, EventArgs.Empty);
+            BufferStateChanged?.Invoke(this, EventArgs.Empty);
+        }
+
+        public event EventHandler FadeEnded;
+        protected void OnFadeEnded()
+        {
+            FadeEnded?.Invoke(this, EventArgs.Empty);
         }
 
         #endregion

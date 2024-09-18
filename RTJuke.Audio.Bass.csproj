@@ -10,7 +10,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\RTJuke.Core\RTJuke.Core.csproj" />
+    <ProjectReference Include="..\rtjuke-core\RTJuke.Core.csproj" />
   </ItemGroup>
 
 </Project>
